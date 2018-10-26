@@ -1,0 +1,7 @@
+*.csproj
+
+/Library
+/obj
+/.vs
+*.sln
+/UIElementsSchema
