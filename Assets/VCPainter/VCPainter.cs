@@ -24,8 +24,7 @@ public class VCPainter : MonoBehaviour
     public bool updateEachFrame = false;
 
     private List<VCPaintJobHandle> paintJobHandles;
-    
-    private System.Diagnostics.Stopwatch stopWatch = new System.Diagnostics.Stopwatch();
+    private bool isPaintingDirty = false;
 
     void Awake()
     {
@@ -46,18 +45,13 @@ public class VCPainter : MonoBehaviour
     {
         if (mode == Mode.JobSystem)
         {
-            bool hasJobRemaining = (paintJobHandles.Count > 0);
-
-            foreach (VCPaintJobHandle paintJobHandle in paintJobHandles)
-            {
-                paintJobHandle.Update();
-            }
+            paintJobHandles.ForEach(paintJobHandle => paintJobHandle.Update());
             paintJobHandles.RemoveAll(paintJobHandle => paintJobHandle.IsCompleted());
 
-            bool hasNoMoreJobsRemaining = (paintJobHandles.Count == 0);
-            if (hasJobRemaining && hasNoMoreJobsRemaining)
+            if (paintJobHandles.Count == 0 && isPaintingDirty)
             {
-                StopAndPrintStopWatchResult();
+                updatePaint = true;
+                Debug.Log("All painting completed. Start new one...");
             }
         }
 
@@ -76,22 +70,26 @@ public class VCPainter : MonoBehaviour
 
     public void Paint()
     {
-        stopWatch.Restart();
-
-        Collider[] colliders = Physics.OverlapSphere(this.transform.position, outerRadius, layerMask.value);
-
-        for (int i = 0; i < colliders.Length; ++i)
+        if (mode == Mode.JobSystem && paintJobHandles.Count > 0)
         {
-            MeshFilter meshFilter = colliders[i].GetComponent<MeshFilter>();
-            if (meshFilter)
-            {
-                PaintMesh(meshFilter);
-            }
+            isPaintingDirty = true;
         }
-
-        if (mode == Mode.SingleCPU)
+        else
         {
-            StopAndPrintStopWatchResult();
+            Debug.Log("Paint...");
+
+            Collider[] colliders = Physics.OverlapSphere(this.transform.position, outerRadius, layerMask.value);
+
+            for (int i = 0; i < colliders.Length; ++i)
+            {
+                MeshFilter meshFilter = colliders[i].GetComponent<MeshFilter>();
+                if (meshFilter)
+                {
+                    PaintMesh(meshFilter);
+                }
+            }
+
+            isPaintingDirty = false;
         }
     }
 
@@ -103,6 +101,8 @@ public class VCPainter : MonoBehaviour
 
         if (mode == Mode.SingleCPU)
         {
+            System.Diagnostics.Stopwatch stopWatch = new System.Diagnostics.Stopwatch();
+
             Transform meshTransform = meshFilter.transform;
 
             Vector3[] vertices = mesh.vertices;
@@ -115,9 +115,14 @@ public class VCPainter : MonoBehaviour
                 colors[i] = Color.Lerp(paintColor, outRadiusColor, colorWeight);
             }
             mesh.colors = colors;
+
+            stopWatch.Stop();
+            Debug.LogFormat("Mesh {0} done in {1} ms", meshFilter.gameObject.name, stopWatch.ElapsedMilliseconds);
         }
         else // if (mode == Mode.JobSystem)
         {
+            Debug.LogFormat("Queue new job for mesh {0}...", meshFilter.gameObject.name);
+
             VCPaintJobHandle.Args args = new VCPaintJobHandle.Args();
             args.innerColor = paintColor;
             args.outerColor = outRadiusColor;
@@ -127,7 +132,7 @@ public class VCPainter : MonoBehaviour
             args.brushPosition = this.transform.position;
 
             VCPaintJobHandle newJobHandle = new VCPaintJobHandle();
-            //newJobHandle.OnJobCompleted += OnJobCompleted;
+            newJobHandle.OnJobCompleted += OnJobCompleted;
             paintJobHandles.Add(newJobHandle);
             newJobHandle.Start(args);
         }
@@ -135,7 +140,7 @@ public class VCPainter : MonoBehaviour
 
     private void OnJobCompleted(VCPaintJobHandle jobHandle)
     {
-        Debug.Log("Paint job completed!");
+        //Debug.Log("Paint job completed!");
     }
 
     private void OnDrawGizmos()
@@ -145,11 +150,5 @@ public class VCPainter : MonoBehaviour
 
         Gizmos.color = Color.blue;
         Gizmos.DrawWireSphere(this.transform.position, innerRadius);
-    }
-
-    private void StopAndPrintStopWatchResult()
-    {
-        stopWatch.Stop();
-        //Debug.LogFormat("VC Painter duration : {0}ms", stopWatch.ElapsedMilliseconds);
     }
 }

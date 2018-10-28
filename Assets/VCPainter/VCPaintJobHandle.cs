@@ -9,7 +9,7 @@ using Unity.Collections.LowLevel.Unsafe;
 
 public class VCPaintJobHandle
 {
-    public struct Args
+    public class Args
     {
         public Color innerColor;
         public Color outerColor;
@@ -20,6 +20,7 @@ public class VCPaintJobHandle
         public MeshFilter meshFilter;
     }
     
+    [Unity.Burst.BurstCompile]
     unsafe struct VCPaintJob : IJob
     {
         [ReadOnly] public Matrix4x4 meshTransformMatrix;
@@ -28,13 +29,15 @@ public class VCPaintJobHandle
         [ReadOnly] public Color innerColor;
         [ReadOnly] public Color outerColor;
 
-        [ReadOnly] public float innerRadius;
-        [ReadOnly] public float outerRadius;
+        [ReadOnly] public float innerRadiusSqr;
+        [ReadOnly] public float outerRadiusSqr;
+
+        [ReadOnly] public int indexStart;
+        [ReadOnly] public int indexEnd;
 
         [ReadOnly] [NativeDisableUnsafePtrRestriction] void* vertices;
         [ReadOnly] public int numVertices;
 
-        //[WriteOnly] public NativeArray<float> colors;
         [WriteOnly] [NativeDisableUnsafePtrRestriction] void* colors;
 
         public void Initialize(Mesh mesh, ref Color[] meshColors)
@@ -43,23 +46,23 @@ public class VCPaintJobHandle
             numVertices = mesh.vertexCount;
 
             colors = UnsafeUtility.AddressOf(ref meshColors[0]);
-            UnsafeUtility.WriteArrayElementWithStride(colors, 0, sizeof(float), 0.88f);
-            UnsafeUtility.WriteArrayElementWithStride(colors, 1, sizeof(float), 0.77f);
-            UnsafeUtility.WriteArrayElementWithStride(colors, 4, sizeof(float), 0.55f);
         }
 
         public void Execute()
         {
-            for (int index = 0; index < numVertices; ++index)
+            int numComponentsInColor = sizeof(Color) / sizeof(float);
+
+            for (int index = indexStart; index < numVertices && index < indexEnd; ++index)
             {
                 Vector3 vertex = UnsafeUtility.ReadArrayElement<Vector3>(vertices, index);
-                float verticeDistance = Vector3.Distance(brushPosition, meshTransformMatrix.MultiplyPoint(vertex));
+                Vector3 brushToVertex = meshTransformMatrix.MultiplyPoint(vertex) - brushPosition;
+                float verticeDistance = brushToVertex.sqrMagnitude;
 
-                float colorWeight = (verticeDistance - innerRadius) / (outerRadius - innerRadius);
+                float colorWeight = (verticeDistance - innerRadiusSqr) / (outerRadiusSqr - innerRadiusSqr);
 
                 Color finalColor = Color.Lerp(innerColor, outerColor, colorWeight);
 
-                int colorIndex = index * 4;
+                int colorIndex = index * numComponentsInColor;
                 UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex, sizeof(float), finalColor.r);
                 UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex + 1, sizeof(float), finalColor.g);
                 UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex + 2, sizeof(float), finalColor.b);
@@ -67,8 +70,7 @@ public class VCPaintJobHandle
         }
     }
 
-    private VCPaintJob paintJob;
-    private JobHandle paintJobHandle;
+    private List<JobHandle> paintJobHandles;
 
     private MeshFilter meshFilter;
     private Color[] colors;
@@ -80,44 +82,63 @@ public class VCPaintJobHandle
 
     public void Start(VCPaintJobHandle.Args args)
     {
-        paintJob = new VCPaintJob()
+        meshFilter = args.meshFilter;
+        Mesh mesh = args.meshFilter.mesh;
+        if (mesh.colors.Length != mesh.vertexCount)
+        {
+            mesh.colors = new Color[mesh.vertexCount];
+        }
+        colors = mesh.colors;
+
+        ScheduleJobs(args);
+        isRunning = true;
+    }
+
+    void ScheduleJobs(VCPaintJobHandle.Args args)
+    {
+        VCPaintJob paintJob = new VCPaintJob()
         {
             innerColor = args.innerColor,
             outerColor = args.outerColor,
 
-            innerRadius = args.innerRadius,
-            outerRadius = args.outerRadius,
+            innerRadiusSqr = args.innerRadius * args.innerRadius,
+            outerRadiusSqr = args.outerRadius * args.outerRadius,
 
             brushPosition = args.brushPosition,
             meshTransformMatrix = args.meshFilter.transform.localToWorldMatrix,
         };
 
-        meshFilter = args.meshFilter;
         Mesh mesh = args.meshFilter.mesh;
-
-        if (mesh.colors.Length != mesh.vertexCount)
-        {
-            mesh.colors = new Color[mesh.vertexCount];
-        }
-
-        colors = mesh.colors;
-
         paintJob.Initialize(mesh, ref colors);
 
-        paintJobHandle = paintJob.Schedule();
-        isRunning = true;
+        paintJobHandles = new List<JobHandle>();
+
+        int numCores = 1; //SystemInfo.processorCount;
+        int numVerticesPerCore = mesh.vertexCount / numCores;
+        int remainingNumVerticesPerCore = mesh.vertexCount % numCores;
+        for (int coreId = 0; coreId < numCores; ++coreId)
+        {
+            paintJob.indexStart = coreId * numVerticesPerCore;
+            paintJob.indexEnd = coreId * numVerticesPerCore + numVerticesPerCore;
+            if (coreId + 1 >= numCores)
+            {
+                paintJob.indexEnd += remainingNumVerticesPerCore;
+            }
+
+            paintJobHandles.Add(paintJob.Schedule());
+        }
     }
 
     public void Update()
     {
-        if (paintJobHandle.IsCompleted && isRunning)
+        if (isRunning && paintJobHandles.TrueForAll(paintJobHandle => paintJobHandle.IsCompleted))
         {
+            paintJobHandles.ForEach(paintJobHandle => paintJobHandle.Complete());
+
             isRunning = false;
             isCompleted = true;
-            paintJobHandle.Complete();
             meshFilter.mesh.colors = colors;
-            ReleaseResources();
-            
+
             if (OnJobCompleted != null)
             {
                 OnJobCompleted(this);
@@ -129,19 +150,12 @@ public class VCPaintJobHandle
     {
         if (isRunning)
         {
-            paintJobHandle.Complete();
-
-            ReleaseResources();
+            paintJobHandles.ForEach(paintJobHandle => paintJobHandle.Complete());
         }
     }
 
     public bool IsCompleted()
     {
         return (isCompleted);
-    }
-
-    public void ReleaseResources()
-    {
-       // paintJob.colors.Dispose();
     }
 }
