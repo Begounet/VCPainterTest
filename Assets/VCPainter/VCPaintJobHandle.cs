@@ -5,7 +5,6 @@ using Unity.Jobs;
 using System;
 using Unity.Collections;
 using System.Linq;
-using Unity.Transforms;
 using Unity.Collections.LowLevel.Unsafe;
 
 public class VCPaintJobHandle
@@ -21,7 +20,6 @@ public class VCPaintJobHandle
         public MeshFilter meshFilter;
     }
     
-    [Unity.Burst.BurstCompile]
     unsafe struct VCPaintJob : IJob
     {
         [ReadOnly] public Matrix4x4 meshTransformMatrix;
@@ -36,33 +34,18 @@ public class VCPaintJobHandle
         [ReadOnly] [NativeDisableUnsafePtrRestriction] void* vertices;
         [ReadOnly] public int numVertices;
 
-        [WriteOnly] public NativeArray<float> colors;
+        //[WriteOnly] public NativeArray<float> colors;
+        [WriteOnly] [NativeDisableUnsafePtrRestriction] void* colors;
 
-        public void Initialize(Mesh mesh)
+        public void Initialize(Mesh mesh, ref Color[] meshColors)
         {
             vertices = UnsafeUtility.AddressOf(ref mesh.vertices[0]);
             numVertices = mesh.vertexCount;
-            
-            colors = new NativeArray<float>(numVertices * 3, Allocator.TempJob);
-        }
 
-        public void GetResult(Mesh mesh)
-        {
-            if (mesh.colors.Length != numVertices)
-            {
-                mesh.colors = new Color[numVertices];
-            }
-
-            Color[] meshColors = mesh.colors;
-            for (int i = 0; i < numVertices; ++i)
-            {
-                meshColors[i] = new Color(colors[i * 3], colors[i * 3 + 1], colors[i * 3 + 2], 1.0f);
-            }
-            mesh.colors = meshColors;
-
-            //void* managedColors = UnsafeUtility.AddressOf(ref mesh.colors[0]);
-            //void* managedNativeArray = UnsafeUtility.AddressOf(ref colors);
-            //UnsafeUtility.MemCpy(managedColors, managedNativeArray, mesh.colors.Length * UnsafeUtility.SizeOf(typeof(Color)));
+            colors = UnsafeUtility.AddressOf(ref meshColors[0]);
+            UnsafeUtility.WriteArrayElementWithStride(colors, 0, sizeof(float), 0.88f);
+            UnsafeUtility.WriteArrayElementWithStride(colors, 1, sizeof(float), 0.77f);
+            UnsafeUtility.WriteArrayElementWithStride(colors, 4, sizeof(float), 0.55f);
         }
 
         public void Execute()
@@ -76,9 +59,10 @@ public class VCPaintJobHandle
 
                 Color finalColor = Color.Lerp(innerColor, outerColor, colorWeight);
 
-                colors[index * 3] = finalColor.r;
-                colors[index * 3 + 1] = finalColor.g;
-                colors[index * 3 + 2] = finalColor.b;
+                int colorIndex = index * 4;
+                UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex, sizeof(float), finalColor.r);
+                UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex + 1, sizeof(float), finalColor.g);
+                UnsafeUtility.WriteArrayElementWithStride(colors, colorIndex + 2, sizeof(float), finalColor.b);
             }
         }
     }
@@ -87,6 +71,7 @@ public class VCPaintJobHandle
     private JobHandle paintJobHandle;
 
     private MeshFilter meshFilter;
+    private Color[] colors;
 
     private bool isRunning = false;
     private bool isCompleted = false;
@@ -109,8 +94,15 @@ public class VCPaintJobHandle
 
         meshFilter = args.meshFilter;
         Mesh mesh = args.meshFilter.mesh;
-                
-        paintJob.Initialize(mesh);
+
+        if (mesh.colors.Length != mesh.vertexCount)
+        {
+            mesh.colors = new Color[mesh.vertexCount];
+        }
+
+        colors = mesh.colors;
+
+        paintJob.Initialize(mesh, ref colors);
 
         paintJobHandle = paintJob.Schedule();
         isRunning = true;
@@ -123,10 +115,13 @@ public class VCPaintJobHandle
             isRunning = false;
             isCompleted = true;
             paintJobHandle.Complete();
-            paintJob.GetResult(meshFilter.mesh);
+            meshFilter.mesh.colors = colors;
             ReleaseResources();
             
-            OnJobCompleted(this);
+            if (OnJobCompleted != null)
+            {
+                OnJobCompleted(this);
+            }
         }
     }
 
@@ -147,6 +142,6 @@ public class VCPaintJobHandle
 
     public void ReleaseResources()
     {
-        paintJob.colors.Dispose();
+       // paintJob.colors.Dispose();
     }
 }

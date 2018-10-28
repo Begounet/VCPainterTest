@@ -127,7 +127,7 @@ public class VCPainter : MonoBehaviour
             args.brushPosition = this.transform.position;
 
             VCPaintJobHandle newJobHandle = new VCPaintJobHandle();
-            newJobHandle.OnJobCompleted += OnJobCompleted;
+            //newJobHandle.OnJobCompleted += OnJobCompleted;
             paintJobHandles.Add(newJobHandle);
             newJobHandle.Start(args);
         }
@@ -150,6 +150,6 @@ public class VCPainter : MonoBehaviour
     private void StopAndPrintStopWatchResult()
     {
         stopWatch.Stop();
-        Debug.LogFormat("VC Painter duration : {0}ms", stopWatch.ElapsedMilliseconds);
+        //Debug.LogFormat("VC Painter duration : {0}ms", stopWatch.ElapsedMilliseconds);
     }
 }

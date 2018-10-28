@@ -1,0 +1,3 @@
+[submodule "Assets/shader-debug"]
+	path = Assets/shader-debug
+	url = https://intra.persistant.fr:3000/Apperture/shader-debug.git
