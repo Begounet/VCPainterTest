@@ -76,7 +76,7 @@ public class VCPainter : MonoBehaviour
         }
         else
         {
-            Debug.Log("Paint...");
+            //Debug.Log("Paint...");
 
             Collider[] colliders = Physics.OverlapSphere(this.transform.position, outerRadius, layerMask.value);
 
@@ -117,11 +117,11 @@ public class VCPainter : MonoBehaviour
             mesh.colors = colors;
 
             stopWatch.Stop();
-            Debug.LogFormat("Mesh {0} done in {1} ms", meshFilter.gameObject.name, stopWatch.ElapsedMilliseconds);
+            //Debug.LogFormat("Mesh {0} done in {1} ms", meshFilter.gameObject.name, stopWatch.ElapsedMilliseconds);
         }
         else // if (mode == Mode.JobSystem)
         {
-            Debug.LogFormat("Queue new job for mesh {0}...", meshFilter.gameObject.name);
+            //Debug.LogFormat("Queue new job for mesh {0}...", meshFilter.gameObject.name);
 
             VCPaintJobHandle.Args args = new VCPaintJobHandle.Args();
             args.innerColor = paintColor;

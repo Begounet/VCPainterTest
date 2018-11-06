@@ -20,7 +20,7 @@ public class VCPaintJobHandle
         public MeshFilter meshFilter;
     }
     
-    [Unity.Burst.BurstCompile]
+    //[Unity.Burst.BurstCompile]
     unsafe struct VCPaintJob : IJob
     {
         [ReadOnly] public Matrix4x4 meshTransformMatrix;
@@ -41,8 +41,9 @@ public class VCPaintJobHandle
         [WriteOnly] [NativeDisableUnsafePtrRestriction] void* colors;
 
         public void Initialize(Mesh mesh, ref Color[] meshColors)
-        {
-            vertices = UnsafeUtility.AddressOf(ref mesh.vertices[0]);
+        { 
+            IntPtr vertexBufferPtr = VCVertexBufferStaticContainer.GetOrCacheVertexBufferPtrFromMesh(mesh);
+            vertices = vertexBufferPtr.ToPointer();
             numVertices = mesh.vertexCount;
 
             colors = UnsafeUtility.AddressOf(ref meshColors[0]);
